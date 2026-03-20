@@ -14,6 +14,58 @@ from rpy2.robjects.conversion import localconverter
 ropls = importr('ropls')
 base = importr('base')
 
+
+def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], title=None,output_file=None,ignore_blanks=True):
+    """
+    For each hue in the list, selects samples present in both data and metadata
+    (with non-null values for that column), runs PCA, and plots a scatterplot.
+
+    hue options: 'timepoint' (uses 'timepoint_r'), 'sample_type', 'instrument'
+    """
+    pca = PCA(n_components=2)
+    scaler = StandardScaler()
+    if ignore_blanks:
+        data = data[~data.index.str.contains("_B_")]
+    n_samples,n_signals = data.shape
+    col_map = {
+        'timepoint': 'timepoint_r',
+        'sample_type': 'sample_type',
+        'instrument': 'instrument',
+    }
+
+    for i,h in enumerate(hue):
+        col = col_map.get(h, h)
+        if col not in metadata.columns:
+            raise ValueError(f"Column '{col}' not found in metadata")
+
+        # Select samples present in both data index and metadata, with non-null hue values
+        aligned_meta = metadata.reindex(data.index).dropna(subset=[col])
+        filtered_data = data.loc[aligned_meta.index]
+
+        if filtered_data.empty:
+            print(f"No samples found for hue='{h}', skipping.")
+            continue
+
+        pca_coords = pca.fit_transform(scaler.fit_transform(np.log2(filtered_data + 1)))
+        pca_df = pd.DataFrame(pca_coords, columns=['PC1', 'PC2'], index=filtered_data.index)
+        pca_df[col] = aligned_meta[col]
+
+        var1, var2 = pca.explained_variance_ratio_ * 100
+        plt.figure()
+        if title:
+            plt.title(f"{title} — colored by {h}")
+        else:
+             plt.title(f'{h}\nSignals:{n_signals} Samples:{n_samples}')
+        sns.scatterplot(data=pca_df, x='PC1', y='PC2', hue=col)
+        plt.xlabel(f"PC1 ({var1:.1f}%)")
+        plt.ylabel(f"PC2 ({var2:.1f}%)")
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        if output_file and i < len(output_file):
+            plt.savefig(output_file[i], bbox_inches='tight')
+        
+
+
 def OPLSDA(data,metadata,y_var='timepoint_r',applylog=True):
     X = data.copy()
     X = X.loc[[i for i in X.index if i in metadata.index], :]
