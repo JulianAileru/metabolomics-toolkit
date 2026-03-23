@@ -11,11 +11,14 @@ import rpy2.robjects as ro
 from rpy2.robjects import pandas2ri
 from rpy2.robjects.packages import importr
 from rpy2.robjects.conversion import localconverter
+import os
+r_bin = r'C:\Users\jaileru\AppData\Local\miniconda3\envs\home_env\Lib\R\bin\x64'
+os.environ['PATH'] = r_bin + os.pathsep + os.environ['PATH']
 ropls = importr('ropls')
 base = importr('base')
 
 
-def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], title=None,output_file=None,ignore_blanks=True):
+def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], title=None,output_file=None,ignore_blanks=True,applylog=True):
     """
     For each hue in the list, selects samples present in both data and metadata
     (with non-null values for that column), runs PCA, and plots a scatterplot.
@@ -46,7 +49,7 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
             print(f"No samples found for hue='{h}', skipping.")
             continue
 
-        pca_coords = pca.fit_transform(scaler.fit_transform(np.log2(filtered_data + 1)))
+        pca_coords = pca.fit_transform(scaler.fit_transform(np.log2(filtered_data + 1) if applylog else filtered_data))
         pca_df = pd.DataFrame(pca_coords, columns=['PC1', 'PC2'], index=filtered_data.index)
         pca_df[col] = aligned_meta[col]
 
