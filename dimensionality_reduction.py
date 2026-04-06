@@ -29,7 +29,6 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
     scaler = StandardScaler()
     if ignore_blanks:
         data = data[~data.index.str.contains("_B_")]
-    n_samples,n_signals = data.shape
     col_map = {
         'timepoint': 'timepoint_r',
         'sample_type': 'sample_type',
@@ -54,6 +53,7 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
         pca_df[col] = aligned_meta[col]
 
         var1, var2 = pca.explained_variance_ratio_ * 100
+        n_samples, n_signals = filtered_data.shape
         plt.figure()
         if title:
             plt.title(f"{title} — colored by {h}")
