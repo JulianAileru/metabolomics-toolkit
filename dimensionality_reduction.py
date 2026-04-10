@@ -3,7 +3,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import seaborn as sns
 import numpy as np
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
+import plotly.express as px
 import warnings
 warnings.simplefilter("ignore", FutureWarning)
 from scipy.stats import skew as scipy_skew, kurtosis as scipy_kurtosis
@@ -19,14 +20,16 @@ base = importr('base')
 biobase = importr("Biobase")
 pvca_pkg = importr("pvca")
 
-def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], title=None,output_file=None,ignore_blanks=True,applylog=True):
+def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], title=None,output_file=None,ignore_blanks=True,applylog=True,backend='seaborn',plot_3d=False):
     """
     For each hue in the list, selects samples present in both data and metadata
     (with non-null values for that column), runs PCA, and plots a scatterplot.
 
     hue options: 'timepoint' (uses 'timepoint_r'), 'sample_type', 'instrument'
+    plot_3d: if True, uses PC3 as z-axis (only supported with backend='plotly')
     """
-    pca = PCA(n_components=2)
+    n_components = 3 if (plot_3d and backend == 'plotly') else 2
+    pca = PCA(n_components=n_components)
     scaler = StandardScaler()
     if ignore_blanks:
         data = data[~data.index.str.contains("_B_")]
@@ -49,24 +52,52 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
             print(f"No samples found for hue='{h}', skipping.")
             continue
 
+        cols = ['PC1', 'PC2', 'PC3'] if n_components == 3 else ['PC1', 'PC2']
         pca_coords = pca.fit_transform(scaler.fit_transform(np.log2(filtered_data + 1) if applylog else filtered_data))
-        pca_df = pd.DataFrame(pca_coords, columns=['PC1', 'PC2'], index=filtered_data.index)
+        pca_df = pd.DataFrame(pca_coords, columns=cols, index=filtered_data.index)
         pca_df[col] = aligned_meta[col]
 
-        var1, var2 = pca.explained_variance_ratio_ * 100
+        var_pct = pca.explained_variance_ratio_ * 100
+        var1, var2 = var_pct[0], var_pct[1]
         n_samples, n_signals = filtered_data.shape
-        plt.figure()
-        if title:
-            plt.title(f"{title} — colored by {h}\nSignals:{n_signals} Samples:{n_samples}")
+        plot_title = (
+            f"{title} — colored by {h}\nSignals:{n_signals} Samples:{n_samples}"
+            if title else f'{h}\nSignals:{n_signals} Samples:{n_samples}'
+        )
+
+        if backend == 'plotly':
+            if plot_3d:
+                var3 = var_pct[2]
+                fig = px.scatter_3d(
+                    pca_df, x='PC1', y='PC2', z='PC3', color=col,
+                    title=plot_title,
+                    labels={
+                        'PC1': f'PC1 ({var1:.1f}%)',
+                        'PC2': f'PC2 ({var2:.1f}%)',
+                        'PC3': f'PC3 ({var3:.1f}%)',
+                    },
+                    hover_name=pca_df.index,
+                )
+            else:
+                fig = px.scatter(
+                    pca_df, x='PC1', y='PC2', color=col,
+                    title=plot_title,
+                    labels={'PC1': f'PC1 ({var1:.1f}%)', 'PC2': f'PC2 ({var2:.1f}%)'},
+                    hover_name=pca_df.index,
+                )
+            fig.show()
+            if output_file and i < len(output_file):
+                fig.write_html(output_file[i])
         else:
-             plt.title(f'{h}\nSignals:{n_signals} Samples:{n_samples}')
-        sns.scatterplot(data=pca_df, x='PC1', y='PC2', hue=col)
-        plt.xlabel(f"PC1 ({var1:.1f}%)")
-        plt.ylabel(f"PC2 ({var2:.1f}%)")
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
-        if output_file and i < len(output_file):
-            plt.savefig(output_file[i], bbox_inches='tight')
+            plt.figure()
+            plt.title(plot_title)
+            sns.scatterplot(data=pca_df, x='PC1', y='PC2', hue=col)
+            plt.xlabel(f"PC1 ({var1:.1f}%)")
+            plt.ylabel(f"PC2 ({var2:.1f}%)")
+            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.tight_layout()
+            if output_file and i < len(output_file):
+                plt.savefig(output_file[i], bbox_inches='tight')
     return pca_df
         
 
