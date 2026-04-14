@@ -8,17 +8,6 @@ import plotly.express as px
 import warnings
 warnings.simplefilter("ignore", FutureWarning)
 from scipy.stats import skew as scipy_skew, kurtosis as scipy_kurtosis
-import rpy2.robjects as ro
-from rpy2.robjects import pandas2ri
-from rpy2.robjects.packages import importr
-from rpy2.robjects.conversion import localconverter
-import os
-r_bin = r'C:\Users\jaileru\AppData\Local\miniconda3\envs\home_env\Lib\R\bin\x64'
-os.environ['PATH'] = r_bin + os.pathsep + os.environ['PATH']
-ropls = importr('ropls')
-base = importr('base')
-biobase = importr("Biobase")
-pvca_pkg = importr("pvca")
 
 def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], title=None,output_file=None,ignore_blanks=True,applylog=True,backend='seaborn',plot_3d=False):
     """
@@ -103,13 +92,19 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
 
 
 def OPLSDA(data,metadata,y_var='timepoint_r',applylog=True):
+    import rpy2.robjects as ro
+    from rpy2.robjects import pandas2ri
+    from rpy2.robjects.packages import importr
+    from rpy2.robjects.conversion import localconverter
+    ropls = importr('ropls')
+
     X = data.copy()
     X = X.loc[[i for i in X.index if i in metadata.index], :]
     if applylog:
         X = np.log2(X+1)
     # Y: response vector aligned to X
     Y = metadata.loc[X.index, y_var]  # adjust column name as needed
-    
+
     # --- Convert to R objects ---
     with localconverter(ro.default_converter + pandas2ri.converter):
         X_r = ro.conversion.py2rpy(X)          # R matrix (samples x features)
@@ -216,7 +211,11 @@ def run_pvca(
     # pvca expects an ExpressionSet where:
     #   - assayData: features x samples matrix (note: transposed from our input)
     #   - phenoData: sample metadata as an AnnotatedDataFrame
- 
+    import rpy2.robjects as ro
+    from rpy2.robjects.packages import importr
+    importr("Biobase")
+    importr("pvca")
+
     # Convert feature matrix to R (features x samples)
     expr_matrix = ro.r["matrix"](
         ro.FloatVector(data.values.T.flatten()),

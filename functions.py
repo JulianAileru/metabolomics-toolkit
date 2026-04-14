@@ -8,12 +8,6 @@ import plotly.express as px
 import warnings
 warnings.simplefilter("ignore", FutureWarning)
 from scipy.stats import skew as scipy_skew, kurtosis as scipy_kurtosis
-import rpy2.robjects as ro
-from rpy2.robjects import pandas2ri
-from rpy2.robjects.packages import importr
-from rpy2.robjects.conversion import localconverter
-ropls = importr('ropls')
-base = importr('base')
 
 def TIC(data, scale=True):
     n_samples, n_signals = data.shape
