@@ -9,7 +9,7 @@ import warnings
 warnings.simplefilter("ignore", FutureWarning)
 from scipy.stats import skew as scipy_skew, kurtosis as scipy_kurtosis
 
-def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], title=None,output_file=None,ignore_blanks=True,applylog=True,backend='seaborn',plot_3d=False):
+def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], title=None,output_file=None,ignore_blanks=True,applylog=True,backend='seaborn',plot_3d=False,y_var_type='categorical',palette='tab10'):
     """
     For each hue in the list, selects samples present in both data and metadata
     (with non-null values for that column), runs PCA, and plots a scatterplot.
@@ -35,6 +35,9 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
 
         # Select samples present in both data index and metadata, with non-null hue values
         aligned_meta = metadata.reindex(data.index).dropna(subset=[col])
+        dropped = data.index.difference(aligned_meta.index)
+        for s in dropped:
+            print(f"Dropping sample '{s}': missing value for hue='{col}'")
         filtered_data = data.loc[aligned_meta.index]
 
         if filtered_data.empty:
@@ -44,7 +47,10 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
         cols = ['PC1', 'PC2', 'PC3'] if n_components == 3 else ['PC1', 'PC2']
         pca_coords = pca.fit_transform(scaler.fit_transform(np.log2(filtered_data + 1) if applylog else filtered_data))
         pca_df = pd.DataFrame(pca_coords, columns=cols, index=filtered_data.index)
-        pca_df[col] = aligned_meta[col]
+        if y_var_type == 'continuous':
+            pca_df[col] = pd.to_numeric(aligned_meta[col], errors='coerce')
+        else:
+            pca_df[col] = aligned_meta[col].astype(str)
 
         var_pct = pca.explained_variance_ratio_ * 100
         var1, var2 = var_pct[0], var_pct[1]
@@ -54,6 +60,11 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
             if title else f'{h}\nSignals:{n_signals} Samples:{n_samples}'
         )
 
+        color_kw = (
+            {'color_continuous_scale': palette}
+            if y_var_type == 'continuous'
+            else {'color_discrete_sequence': getattr(px.colors.qualitative, palette, None)}
+        )
         if backend == 'plotly':
             if plot_3d:
                 var3 = var_pct[2]
@@ -66,6 +77,7 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
                         'PC3': f'PC3 ({var3:.1f}%)',
                     },
                     hover_name=pca_df.index,
+                    **color_kw,
                 )
             else:
                 fig = px.scatter(
@@ -73,6 +85,7 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
                     title=plot_title,
                     labels={'PC1': f'PC1 ({var1:.1f}%)', 'PC2': f'PC2 ({var2:.1f}%)'},
                     hover_name=pca_df.index,
+                    **color_kw,
                 )
             fig.show()
             if output_file and i < len(output_file):
@@ -80,7 +93,7 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
         else:
             plt.figure()
             plt.title(plot_title)
-            sns.scatterplot(data=pca_df, x='PC1', y='PC2', hue=col)
+            sns.scatterplot(data=pca_df, x='PC1', y='PC2', hue=col, palette=palette)
             plt.xlabel(f"PC1 ({var1:.1f}%)")
             plt.ylabel(f"PC2 ({var2:.1f}%)")
             plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -91,40 +104,91 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
         
 
 
-def OPLSDA(data,metadata,y_var='timepoint_r',applylog=True):
+def OPLSDA(data,metadata,y_var='timepoint_r',applylog=True,permI=100,y_var_type='categorical',palette='tab10',orthoI=None,predI=1):
     import rpy2.robjects as ro
     from rpy2.robjects import pandas2ri
     from rpy2.robjects.packages import importr
     from rpy2.robjects.conversion import localconverter
     ropls = importr('ropls')
 
-    X = data.copy()
-    X = X.loc[[i for i in X.index if i in metadata.index], :]
+    aligned_meta = metadata.reindex(data.index).dropna(subset=[y_var])
+    dropped = data.index.difference(aligned_meta.index)
+    for s in dropped:
+        print(f"Dropping sample '{s}': missing value for y_var='{y_var}'")
+    X = data.loc[aligned_meta.index].copy()
     if applylog:
         X = np.log2(X+1)
     # Y: response vector aligned to X
-    Y = metadata.loc[X.index, y_var]  # adjust column name as needed
+    Y = aligned_meta[y_var]
+
+    if y_var_type == 'continuous':
+        Y = pd.to_numeric(Y, errors='coerce')
+    else:
+        # Normalise float-encoded labels ("1.0" -> "1") so ropls treats them as
+        # clean class names rather than numeric-looking strings.
+        def _to_clean_str(v):
+            try:
+                return str(int(float(v)))
+            except (ValueError, TypeError):
+                return str(v)
+        Y = Y.map(_to_clean_str)
 
     # --- Convert to R objects ---
     with localconverter(ro.default_converter + pandas2ri.converter):
         X_r = ro.conversion.py2rpy(X)          # R matrix (samples x features)
-        Y_r = ro.StrVector(Y.tolist())          # character vector for PLS-DA
+        Y_r = ro.FloatVector(Y.tolist()) if y_var_type == 'continuous' else ro.StrVector(Y.tolist())
+    # Explicitly set R colnames from pandas columns.
+    # pandas2ri does NOT reliably transfer column names as R colnames,
+    # and ropls uses them to populate rownames on loadings/VIP vectors.
+    X_r.colnames = ro.StrVector(list(X.columns))
     # --- Run OPLS-DA (1 predictive + orthogonal components) ---
     oplsda_model = ropls.opls(
         X_r,
         Y_r,
-        predI  = 1,
-        orthoI = ro.NA_Integer,   # auto-select number of orthogonal components
+        predI  = ro.NA_Integer if predI is None else predI,
+        orthoI = ro.NA_Integer if orthoI is None else orthoI,
+        permI  = permI,
     )
     
     
+    # Get feature names actually used by the model before converting to numpy.
+    # ropls may exclude near-zero variance features, so the VIP vector length
+    # can be smaller than X.columns.  rownames are also NULL in some ropls
+    # versions when no features are excluded, so we try multiple sources.
+    P_load_r = ropls.getLoadingMN(oplsda_model)
+    vip_r    = ropls.getVipVn(oplsda_model)
+    n_vip    = len(vip_r)
+
+    if n_vip == 0:
+        print("OPLS-DA: no significant predictive component found; model was not built.")
+        return None
+
+    included_features = None
+    for names_src in (P_load_r.rownames, vip_r.names):
+        try:
+            candidate = list(names_src)
+            if len(candidate) == n_vip:
+                included_features = candidate
+                break
+        except TypeError:
+            continue
+
+    if included_features is None:
+        if n_vip == len(X.columns):
+            included_features = list(X.columns)
+        else:
+            raise ValueError(
+                f"ropls excluded {len(X.columns) - n_vip} feature(s) but "
+                "rownames are unavailable; cannot map VIP scores to feature names."
+            )
+
     with localconverter(ro.default_converter + pandas2ri.converter):
         # Scores (T scores = predictive, To = orthogonal)
         T_scores  = ro.conversion.rpy2py(ropls.getScoreMN(oplsda_model))
         To_scores = ro.conversion.rpy2py(ropls.getScoreMN(oplsda_model, orthoL=True))
-    
+
         # Loadings
-        P_load  = ro.conversion.rpy2py(ropls.getLoadingMN(oplsda_model))
+        P_load  = ro.conversion.rpy2py(P_load_r)
         Po_load = ro.conversion.rpy2py(ropls.getLoadingMN(oplsda_model, orthoL=True))
 
         # VIP scores (predictive importance)
@@ -132,11 +196,11 @@ def OPLSDA(data,metadata,y_var='timepoint_r',applylog=True):
         model_df = ro.conversion.rpy2py(oplsda_model.slots["modelDF"])
     T_df  = pd.DataFrame(T_scores,  index=X.index)
     To_df = pd.DataFrame(To_scores, index=X.index)
-    vip_s = pd.Series(vip, index=X.columns, name='VIP')
+    vip_s = pd.Series(vip, index=included_features, name='VIP')
     display = pd.concat([T_df, To_df.iloc[:, 0]], axis=1)
     display.columns=['Predictive',"Orthogonal"]
     display['sample_type'] = metadata.loc[display.index, y_var]
-    sns.scatterplot(display,x='Predictive',y='Orthogonal',hue='sample_type')
+    sns.scatterplot(display,x='Predictive',y='Orthogonal',hue='sample_type',palette=palette)
     plt.title("OPLS-DA\n Predictive Component")
     return {"Predictive":T_df,"Orthogonal":To_df,"Predictive_Loadings":P_load,"Orthogonal_Loadings":Po_load,"VIP_Scores":vip_s,"Model_Statistics":model_df}
 
