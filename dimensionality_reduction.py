@@ -9,7 +9,7 @@ import warnings
 warnings.simplefilter("ignore", FutureWarning)
 from scipy.stats import skew as scipy_skew, kurtosis as scipy_kurtosis
 
-def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], title=None,output_file=None,ignore_blanks=True,applylog=True,backend='seaborn',plot_3d=False,y_var_type='categorical',palette='tab10'):
+def pca_plot(data, metadata,hue , title=None,output_file=None,ignore_blanks=True,applylog=True,backend='seaborn',plot_3d=False,y_var_type='categorical',palette='tab10',verbose=False):
     """
     For each hue in the list, selects samples present in both data and metadata
     (with non-null values for that column), runs PCA, and plots a scatterplot.
@@ -36,8 +36,9 @@ def pca_plot(data, metadata, hue=['timepoint', 'sample_type', 'instrument'], tit
         # Select samples present in both data index and metadata, with non-null hue values
         aligned_meta = metadata.reindex(data.index).dropna(subset=[col])
         dropped = data.index.difference(aligned_meta.index)
-        for s in dropped:
-            print(f"Dropping sample '{s}': missing value for hue='{col}'")
+        if verbose:
+            for s in dropped:
+                print(f"Dropping sample '{s}': missing value for hue='{col}'")
         filtered_data = data.loc[aligned_meta.index]
 
         if filtered_data.empty:
