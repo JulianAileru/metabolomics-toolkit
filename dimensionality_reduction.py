@@ -105,7 +105,7 @@ def pca_plot(data, metadata,hue , title=None,output_file=None,ignore_blanks=True
         
 
 
-def OPLSDA(data,metadata,y_var='timepoint_r',applylog=True,permI=100,y_var_type='categorical',palette='tab10',orthoI=None,predI=1):
+def OPLSDA(data,metadata,y_var='timepoint_r',applylog=True,permI=100,y_var_type='categorical',palette='tab10',orthoI=None,predI=1,plot=True):
     import rpy2.robjects as ro
     from rpy2.robjects import pandas2ri
     from rpy2.robjects.packages import importr
@@ -201,8 +201,9 @@ def OPLSDA(data,metadata,y_var='timepoint_r',applylog=True,permI=100,y_var_type=
     display = pd.concat([T_df, To_df.iloc[:, 0]], axis=1)
     display.columns=['Predictive',"Orthogonal"]
     display['sample_type'] = metadata.loc[display.index, y_var]
-    sns.scatterplot(display,x='Predictive',y='Orthogonal',hue='sample_type',palette=palette)
-    plt.title("OPLS-DA\n Predictive Component")
+    if plot:
+        sns.scatterplot(display,x='Predictive',y='Orthogonal',hue='sample_type',palette=palette)
+        plt.title("OPLS-DA\n Predictive Component")
     return {"Predictive":T_df,"Orthogonal":To_df,"Predictive_Loadings":P_load,"Orthogonal_Loadings":Po_load,"VIP_Scores":vip_s,"Model_Statistics":model_df}
 
 def run_pvca(
